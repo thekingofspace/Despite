@@ -23,4 +23,3 @@ desktop.ini
 *.mobileprovision
 *.provisionprofile
 local.properties
-scripts/make_icons.py
