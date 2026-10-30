@@ -1382,6 +1382,10 @@ pub fn tool_options_bar(App: &mut DespiteApp, Ui: &mut Ui) {
             Tool::Picker => {
                 Ui.checkbox(&mut Options.PickerMerged, "Sample all layers");
             }
+            Tool::Text => {
+                crate::textui::style_controls(Ui, &mut Options.Text, "TextBar", false, "");
+                Ui.label(RichText::new("Click the canvas to type").weak());
+            }
             Tool::Move => {
                 Ui.checkbox(&mut Options.MoveSelectsItems, "Click selects scene items");
                 Ui.label("Arrow keys nudge · Shift = 10px");

@@ -15,6 +15,8 @@ advanced-brushes = []
 
 [dependencies]
 base64.workspace = true
+cosmic-text.workspace = true
+epaint_default_fonts = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 bytemuck.workspace = true
 gif.workspace = true
 image.workspace = true

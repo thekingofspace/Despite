@@ -129,6 +129,7 @@ pub struct Stroke {
     Generator: Rng,
     Seed: u64,
     Trail: Vec<(i32, i32)>,
+    Visits: HashMap<(i32, i32), u32>,
     Smudge: Option<SmudgeState>,
     Pending: IRect,
 }
@@ -160,6 +161,7 @@ impl Stroke {
             DabIndex: 0,
             Direction: 0.0,
             Trail: Vec::new(),
+            Visits: HashMap::new(),
             Smudge: None,
             Pending: IRect::Empty,
         }
@@ -283,11 +285,22 @@ impl Stroke {
             let MiddleTouchesFirst = Middle.0 == First.0 || Middle.1 == First.1;
             let MiddleTouchesLast = Middle.0 == Pixel.0 || Middle.1 == Pixel.1;
             if Diagonal && MiddleTouchesFirst && MiddleTouchesLast {
-                self.clear_pixel_with_symmetry(Target, Middle);
+                let Remaining = match self.Visits.get_mut(&Middle) {
+                    Some(Count) => {
+                        *Count = Count.saturating_sub(1);
+                        *Count
+                    }
+                    None => 0,
+                };
+                if Remaining == 0 {
+                    self.Visits.remove(&Middle);
+                    self.clear_pixel_with_symmetry(Target, Middle);
+                }
                 self.Trail.pop();
             }
         }
         self.Trail.push(Pixel);
+        *self.Visits.entry(Pixel).or_insert(0) += 1;
         let (ImageX, ImageY) = self.LayerToImage.apply(Pixel.0 as f32 + 0.5, Pixel.1 as f32 + 0.5);
         self.emit_dabs(Target, StrokePoint::new(ImageX, ImageY, 1.0));
     }
@@ -910,6 +923,21 @@ mod tests {
         assert_eq!(Pixels.get(1, 1)[3], 255);
         assert_eq!(Pixels.get(2, 1)[3], 0);
         assert_eq!(Pixels.get(2, 2)[3], 255);
+    }
+
+    #[test]
+    fn pixel_perfect_backtracking_keeps_earlier_pixels() {
+        let Base = Layer::new(LayerId(1), "L", 8, 8);
+        let mut Pixels = (*Base.Pixels).clone();
+        let mut Active = Stroke::begin(&pencil(), StrokeContext::default(), &Base);
+        for Point in [(0.5, 0.5), (1.5, 0.5), (2.5, 0.5), (3.5, 0.5), (4.5, 0.5), (5.5, 0.5), (5.5, 1.5), (4.5, 1.5), (4.5, 0.5), (3.5, 0.5), (2.5, 1.5)] {
+            Active.add_point(&mut Pixels, StrokePoint::new(Point.0, Point.1, 1.0));
+        }
+        Active.finish(&mut Pixels);
+        for X in 0..5 {
+            assert_eq!(Pixels.get(X, 0)[3], 255, "pixel {X} was erased");
+        }
+        assert_eq!(Pixels.get(5, 0)[3], 0);
     }
 
     #[test]

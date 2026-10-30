@@ -192,6 +192,7 @@ pub fn render_scene(Owner: &Project, Target: &Scene, Frame: u32) -> Raster {
             Transform: Item.Transform,
             Pixels: Arc::new(Pixels),
             Boil: None,
+            Text: None,
         });
     }
     let Refs: Vec<&Layer> = Stack.iter().collect();

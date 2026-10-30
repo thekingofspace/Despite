@@ -28,6 +28,7 @@ despite-video = { path = "crates/despite-video" }
 despite-app = { path = "crates/despite-app", default-features = false }
 
 anyhow = "1"
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
 base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 dirs = "7"

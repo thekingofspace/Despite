@@ -1,5 +1,6 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
+mod animator;
 mod app;
 mod canvas;
 mod clipboard;
@@ -11,6 +12,7 @@ mod icons;
 mod panels;
 mod platform;
 mod settings;
+mod textui;
 mod tools;
 mod transform;
 mod view;

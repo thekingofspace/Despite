@@ -18,20 +18,23 @@ pub enum DocumentRef {
 pub enum ProjectKind {
     #[default]
     Art,
+    Animation,
 }
 
 impl ProjectKind {
-    pub const All: &'static [ProjectKind] = &[ProjectKind::Art];
+    pub const All: &'static [ProjectKind] = &[ProjectKind::Art, ProjectKind::Animation];
 
     pub fn name(self) -> &'static str {
         match self {
             ProjectKind::Art => "Art",
+            ProjectKind::Animation => "Animation (rig)",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             ProjectKind::Art => "Images with layers, scenes, sprite sheets, GIFs and pixel art.",
+            ProjectKind::Animation => "Rig-based animation: parts linked by bones, a timeline with keyframes, constraints, logic, masks and effects. Exports GIF, video and sprite sheets.",
         }
     }
 }
@@ -100,6 +103,7 @@ pub struct ProjectShader {
     pub OutputWidth: u32,
     pub OutputHeight: u32,
     pub Mode: CompileMode,
+    pub ApplyOnExport: bool,
 }
 
 impl Default for ProjectShader {
@@ -116,6 +120,7 @@ impl Default for ProjectShader {
             OutputWidth: 0,
             OutputHeight: 0,
             Mode: CompileMode::Image,
+            ApplyOnExport: true,
         }
     }
 }
@@ -131,6 +136,7 @@ pub struct Project {
     pub Palette: Vec<Color>,
     pub Active: Option<DocumentRef>,
     pub NextId: u64,
+    pub Rig: crate::animation::Rig,
 }
 
 pub fn default_palette() -> Vec<Color> {
@@ -163,6 +169,7 @@ impl Project {
             Palette: default_palette(),
             Active: None,
             NextId: 1,
+            Rig: crate::animation::Rig::default(),
         }
     }
 
@@ -427,6 +434,7 @@ impl Project {
                 Highest = Highest.max(Item.Id);
             }
         }
+        Highest = Highest.max(self.Rig.max_id());
         for Script in &self.Scripts {
             Highest = Highest.max(Script.Id);
         }

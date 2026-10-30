@@ -280,3 +280,20 @@ fn runner_can_move_to_worker_thread() {
         .expect("render on worker");
     assert_eq!(Bytes, ShaderImage::filled(2, 2, [5, 6, 7, 8]).Rgba);
 }
+
+#[test]
+fn only_frame_renders_one_timed_frame() {
+    let Some(mut Runner) = runner() else { return };
+    let Source = "fn effect(Uv: vec2<f32>, Pixel: vec2<f32>) -> vec4<f32> {\n    return vec4<f32>(Globals.Time, f32(Globals.Frame) / 255.0, Globals.Progress, f32(Globals.FrameCount) / 255.0);\n}\n";
+    let mut Job = ShaderJob::new(Source, ShaderImage::filled(5, 3, [0, 0, 0, 255]));
+    Job.FrameCount = 4;
+    Job.Fps = 4.0;
+    Job.OnlyFrame = Some(2);
+    let Output = Runner.run(&Job).expect("single timed frame");
+    assert_eq!(Output.Frames.len(), 1);
+    let Pixel = Output.Frames[0].pixel(2, 1).unwrap();
+    assert!(close(Pixel[0], 128), "time {Pixel:?}");
+    assert_eq!(Pixel[1], 2);
+    assert!(close(Pixel[2], 170), "progress {Pixel:?}");
+    assert_eq!(Pixel[3], 4);
+}

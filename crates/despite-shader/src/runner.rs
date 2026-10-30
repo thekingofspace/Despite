@@ -482,8 +482,12 @@ impl ShaderRunner {
             return Err(wgpu_error("Could not prepare GPU resources", Error));
         }
 
-        let mut Frames = Vec::with_capacity(Job.FrameCount as usize);
-        for Frame in 0..Job.FrameCount {
+        let Range = match Job.OnlyFrame {
+            Some(Only) => Only..Only + 1,
+            None => 0..Job.FrameCount,
+        };
+        let mut Frames = Vec::with_capacity(Range.len());
+        for Frame in Range {
             let Globals = GlobalsData::for_frame(
                 (OutputWidth, OutputHeight),
                 (Job.Main.Width, Job.Main.Height),

@@ -147,6 +147,7 @@ pub struct ShaderJob {
     pub FrameCount: u32,
     pub Fps: f32,
     pub SmoothSampling: bool,
+    pub OnlyFrame: Option<u32>,
 }
 
 impl ShaderJob {
@@ -160,6 +161,7 @@ impl ShaderJob {
             FrameCount: 1,
             Fps: 12.0,
             SmoothSampling: true,
+            OnlyFrame: None,
         }
     }
 

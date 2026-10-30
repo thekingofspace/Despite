@@ -51,6 +51,13 @@ struct GestureMemory {
     Travel: f32,
     Fingers: usize,
     Active: bool,
+    Center: Pos2,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ZoomAccumulator {
+    Scroll: f32,
+    Pinch: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -151,6 +158,7 @@ pub fn canvas_ui(App: &mut DespiteApp, Ui: &mut egui::Ui) {
     let Viewport = Response.rect;
     {
         let View = App.Views.entry(Document).or_default();
+        View.PixelsPerPoint = Context.pixels_per_point();
         if View.NeedsFit || (View.AutoFit && View.LastViewport != Viewport) {
             View.fit(Viewport, Width, Height);
         }
@@ -218,12 +226,13 @@ fn handle_navigation(App: &mut DespiteApp, Ui: &egui::Ui, Response: &egui::Respo
     if let Some(Touch) = MultiTouch {
         if Touch.num_touches >= 2 {
             if !Memory.Active {
-                Memory = GestureMemory { Start: Time, Travel: 0.0, Fingers: Touch.num_touches, Active: true };
+                Memory = GestureMemory { Start: Time, Travel: 0.0, Fingers: Touch.num_touches, Active: true, Center: Touch.center_pos };
                 if matches!(App.Interaction, Interaction::Painting { .. } | Interaction::Shape { .. } | Interaction::Gradient { .. }) {
                     App.cancel_interaction();
                 }
             }
             Memory.Fingers = Memory.Fingers.max(Touch.num_touches);
+            Memory.Center = Touch.center_pos;
             Memory.Travel += Touch.translation_delta.length() + (Touch.zoom_delta - 1.0).abs() * 100.0;
             let View = App.Views.entry(Document).or_default();
             View.Pan += Touch.translation_delta;
@@ -242,6 +251,11 @@ fn handle_navigation(App: &mut DespiteApp, Ui: &egui::Ui, Response: &egui::Respo
             }
         }
         Memory.Active = false;
+        if !App.Settings.SmoothZoom {
+            let View = App.Views.entry(Document).or_default();
+            let Snapped = View.snap_zoom(View.Zoom);
+            View.zoom_around(Viewport, Width, Height, Memory.Center, Snapped);
+        }
     }
     Ui.data_mut(|Data| Data.insert_temp(GestureId, Memory));
     if Memory.Active {
@@ -252,20 +266,49 @@ fn handle_navigation(App: &mut DespiteApp, Ui: &egui::Ui, Response: &egui::Respo
     let ScrollZooms = App.Settings.ScrollWheel == crate::settings::ScrollAction::Zoom;
     let Invert = if App.Settings.InvertScroll { -1.0 } else { 1.0 };
     let View = App.Views.entry(Document).or_default();
+    let Smooth = App.Settings.SmoothZoom;
+    let AccumulatorId = Response.id.with("zoom-accumulator");
+    let mut Accumulator: ZoomAccumulator = Ui.data(|Data| Data.get_temp(AccumulatorId).unwrap_or_default());
     if Hovered {
         if (ZoomDelta - 1.0).abs() > 1e-4 {
-            let NewZoom = View.Zoom * ZoomDelta;
-            View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+            if Smooth {
+                let NewZoom = View.Zoom * ZoomDelta;
+                View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+            } else {
+                Accumulator.Pinch += ZoomDelta.ln();
+                let Threshold = 1.25f32.ln();
+                while Accumulator.Pinch.abs() >= Threshold {
+                    let Direction = Accumulator.Pinch.signum() as i32;
+                    Accumulator.Pinch -= Direction as f32 * Threshold;
+                    let NewZoom = View.stepped_zoom(Direction);
+                    View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+                }
+            }
         } else if Scroll != Vec2::ZERO {
             if ScrollZooms && !Modifiers.shift {
-                let Steps = Scroll.y * Invert / 60.0;
-                let NewZoom = View.Zoom * ZoomStep.powf(Steps);
-                View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+                if Smooth {
+                    let Steps = Scroll.y * Invert / 60.0;
+                    let NewZoom = View.Zoom * ZoomStep.powf(Steps);
+                    View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+                } else {
+                    let Delta = Scroll.y * Invert;
+                    if Delta.signum() != Accumulator.Scroll.signum() {
+                        Accumulator.Scroll = 0.0;
+                    }
+                    Accumulator.Scroll += Delta;
+                    while Accumulator.Scroll.abs() >= 40.0 {
+                        let Direction = Accumulator.Scroll.signum() as i32;
+                        Accumulator.Scroll -= Direction as f32 * 40.0;
+                        let NewZoom = View.stepped_zoom(Direction);
+                        View.zoom_around(Viewport, Width, Height, Pointer, NewZoom);
+                    }
+                }
             } else {
                 View.Pan += if Modifiers.shift && !ScrollZooms { Vec2::new(Scroll.y, Scroll.x) } else { Scroll } * Invert;
             }
         }
     }
+    Ui.data_mut(|Data| Data.insert_temp(AccumulatorId, Accumulator));
     let PanDrag = Response.dragged_by(PointerButton::Middle)
         || (SpaceDown && !IsScene && Response.dragged_by(PointerButton::Primary))
         || (App.Tool == Tool::Pan && Response.dragged_by(PointerButton::Primary));
@@ -368,6 +411,9 @@ fn tool_brush(App: &DespiteApp) -> despite_core::Brush {
 fn editable_layer(App: &mut DespiteApp) -> Option<(ImageId, LayerId)> {
     let Id = App.active_image_id()?;
     ensure_paintable(App, Id);
+    if let Some(Entry) = App.Project.image_mut(Id).and_then(|Found| Found.active_layer_mut()) {
+        Entry.Text = None;
+    }
     let Found = App.Project.image(Id)?;
     let Entry = Found.active_layer()?;
     if Entry.Locked {
@@ -571,6 +617,7 @@ fn begin_tool(
             }
         }
         Tool::Fill => bucket_fill(App, Document, Position, Paint),
+        Tool::Text => crate::textui::begin(App, Position, Current),
         Tool::MagicWand => magic_wand(App, Document, Position, selection_mode(App, Modifiers)),
         Tool::Line | Tool::Rectangle | Tool::Ellipse | Tool::Gradient => {
             let Some((Image, LayerRef)) = editable_layer(App) else { return };
@@ -1000,7 +1047,9 @@ fn draw(App: &mut DespiteApp, Context: &egui::Context, Painter: &egui::Painter, 
     let CheckerId = checker_texture(App, Context);
     let Canvas = App.Views.entry(Document).or_default().canvas_rect(Viewport, Width, Height);
     let Painter = Painter.with_clip_rect(Viewport);
-    let CheckerCell = App.Settings.CheckerSize.max(1) as f32 * 2.0;
+    let CheckerZoom = App.Views.get(&Document).map(|View| View.Zoom).unwrap_or(1.0).max(0.001);
+    let CheckerImageCell = (App.Settings.CheckerSize.max(1) as f32 / CheckerZoom).max(1.0).log2().round().exp2();
+    let CheckerCell = CheckerImageCell * CheckerZoom * 2.0;
     let CheckerUv = Rect::from_min_max(Pos2::ZERO, Pos2::new(Canvas.width() / CheckerCell, Canvas.height() / CheckerCell));
     let Background = match Document {
         DocumentRef::Scene(Id) => App.Project.scene(Id).and_then(|Found| Found.Background),
@@ -1088,6 +1137,9 @@ fn draw(App: &mut DespiteApp, Context: &egui::Context, Painter: &egui::Painter, 
     draw_selection(App, &Painter, Canvas, Zoom, Document);
     draw_symmetry(App, &Painter, Canvas, Zoom, Viewport);
     draw_interaction(App, &Painter, Canvas, Zoom);
+    if let DocumentRef::Image(Id) = Document {
+        crate::textui::draw_highlight(App, &Painter, Canvas, Zoom, Id);
+    }
     draw_cursor(App, Context, &Painter, Canvas, Zoom, Response, Document);
     if App.Tool == Tool::Move && matches!(Document, DocumentRef::Image(_)) {
         crate::transform::draw(App, &Painter, Canvas, Zoom, Response.hover_pos());
@@ -1103,19 +1155,23 @@ fn draw_grid(Painter: &egui::Painter, Canvas: Rect, Visible: Rect, Zoom: f32, St
     if SpacingX < 3.0 || SpacingY < 3.0 {
         return;
     }
-    let StrokeStyle = Line::new(1.0, Color);
+    let Ppp = Painter.ctx().pixels_per_point().max(0.25);
+    let Snap = |Value: f32| (Value * Ppp).round() / Ppp + 0.5 / Ppp;
+    let StrokeStyle = Line::new(1.0 / Ppp, Color);
     let FirstX = ((Visible.min.x - Canvas.min.x) / SpacingX).ceil() as i32;
     let LastX = ((Visible.max.x - Canvas.min.x) / SpacingX).floor() as i32;
+    let mut Shapes = Vec::with_capacity((LastX - FirstX + 1).max(0) as usize * 2);
     for Index in FirstX..=LastX {
-        let X = Canvas.min.x + Index as f32 * SpacingX;
-        Painter.line_segment([Pos2::new(X, Visible.min.y), Pos2::new(X, Visible.max.y)], StrokeStyle);
+        let X = Snap(Canvas.min.x + Index as f32 * SpacingX);
+        Shapes.push(egui::Shape::line_segment([Pos2::new(X, Visible.min.y), Pos2::new(X, Visible.max.y)], StrokeStyle));
     }
     let FirstY = ((Visible.min.y - Canvas.min.y) / SpacingY).ceil() as i32;
     let LastY = ((Visible.max.y - Canvas.min.y) / SpacingY).floor() as i32;
     for Index in FirstY..=LastY {
-        let Y = Canvas.min.y + Index as f32 * SpacingY;
-        Painter.line_segment([Pos2::new(Visible.min.x, Y), Pos2::new(Visible.max.x, Y)], StrokeStyle);
+        let Y = Snap(Canvas.min.y + Index as f32 * SpacingY);
+        Shapes.push(egui::Shape::line_segment([Pos2::new(Visible.min.x, Y), Pos2::new(Visible.max.x, Y)], StrokeStyle));
     }
+    Painter.extend(Shapes);
 }
 
 fn draw_scene_items(App: &DespiteApp, Painter: &egui::Painter, Canvas: Rect, Zoom: f32, Id: SceneId) {
@@ -1231,6 +1287,7 @@ fn draw_cursor(App: &DespiteApp, Context: &egui::Context, Painter: &egui::Painte
         Tool::Pan => CursorIcon::Grab,
         Tool::Move => CursorIcon::Move,
         Tool::Picker | Tool::Fill | Tool::MagicWand => CursorIcon::Crosshair,
+        Tool::Text => CursorIcon::Text,
         Tool::Brush | Tool::Pencil | Tool::Eraser if App.Settings.ShowBrushOutline && matches!(Document, DocumentRef::Image(_)) => CursorIcon::None,
         _ => CursorIcon::Crosshair,
     };

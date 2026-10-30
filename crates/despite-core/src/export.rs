@@ -47,6 +47,8 @@ pub enum FrameSource {
     SelectedLayers { Image: ImageId, Layers: Vec<LayerId>, Space: LayerSpace },
     Scene(SceneId),
     SceneRange { Scene: SceneId, Start: u32, End: u32 },
+    Animation { Clip: usize },
+    AnimationFrame { Clip: usize, Frame: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -103,6 +105,13 @@ pub fn layer_raster(Owner: &Image, Chosen: &Layer, Space: LayerSpace) -> Raster 
 pub fn collect_frames(Owner: &Project, Source: &FrameSource) -> Vec<Frame> {
     let ImageFrame = |Found: &Image| Frame { Name: Found.Name.clone(), Pixels: Found.composite(), DelayMs: Found.FrameDelayMs };
     match Source {
+        FrameSource::Animation { Clip } => crate::animation::clip_frames(Owner, *Clip, None),
+        FrameSource::AnimationFrame { Clip, Frame: Index } => {
+            let Sprites = crate::animation::SpriteCache::build(Owner);
+            let Pixels = crate::animation::render_frame(Owner, Some(*Clip), *Index as f32, &Sprites, None);
+            let Delay = Owner.Rig.Clips.get(*Clip).map(|Found| (1000.0 / Found.Fps.max(0.1)).round() as u32).unwrap_or(100);
+            vec![Frame { Name: format!("Frame {}", Index + 1), Pixels, DelayMs: Delay }]
+        }
         FrameSource::Image(Id) => match Owner.image(*Id) {
             Some(Found) if Found.boil_frame_count() > 1 => (0..Found.boil_frame_count())
                 .map(|Index| Frame { Name: format!("{} {}", Found.Name, Index + 1), Pixels: Found.composite_frame(Index), DelayMs: Found.FrameDelayMs })

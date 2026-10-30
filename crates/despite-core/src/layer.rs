@@ -28,6 +28,7 @@ pub struct Layer {
     pub Transform: LayerTransform,
     pub Pixels: Arc<Raster>,
     pub Boil: Option<BoilTag>,
+    pub Text: Option<crate::text::TextData>,
 }
 
 impl Layer {
@@ -47,6 +48,7 @@ impl Layer {
             Transform: LayerTransform::default(),
             Pixels: Arc::new(Pixels),
             Boil: None,
+            Text: None,
         }
     }
 

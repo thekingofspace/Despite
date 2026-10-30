@@ -1,4 +1,5 @@
 mod actions;
+mod rig;
 mod tools;
 
 use std::collections::HashMap;
@@ -8,7 +9,7 @@ use egui::{Color32, Response, Ui, Vec2};
 pub const IconSize: f32 = 16.0;
 
 fn mask(Name: &str) -> Option<&'static [&'static str; 16]> {
-    tools::Names.iter().chain(actions::Names.iter()).find(|(Candidate, _)| *Candidate == Name).map(|(_, Rows)| *Rows)
+    tools::Names.iter().chain(actions::Names.iter()).chain(rig::Names.iter()).find(|(Candidate, _)| *Candidate == Name).map(|(_, Rows)| *Rows)
 }
 
 

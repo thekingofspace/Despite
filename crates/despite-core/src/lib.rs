@@ -1,5 +1,6 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
+pub mod animation;
 pub mod blend;
 pub mod brush;
 pub mod color;
@@ -20,6 +21,7 @@ pub mod resample;
 pub mod rng;
 pub mod scene;
 pub mod selection;
+pub mod text;
 pub mod transform;
 
 pub use blend::BlendMode;

@@ -18,6 +18,7 @@ pub enum PendingAction {
     Open(Option<PathBuf>),
     Close,
     Quit,
+    OpenSampleRig,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -208,6 +209,17 @@ pub enum ExportWhat {
 }
 
 impl ExportWhat {
+    fn label(self, Animation: bool) -> &'static str {
+        if !Animation {
+            return self.name();
+        }
+        match self {
+            ExportWhat::CurrentFrame => "Current frame only",
+            ExportWhat::AllImages => "All animations, one after another",
+            _ => "Current animation",
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             ExportWhat::CurrentDocument => "Current image / whole scene",
@@ -254,12 +266,19 @@ pub struct ExportState {
     pub Result: Option<String>,
     #[cfg(feature = "desktop")]
     pub Video: despite_video::VideoOptions,
+    #[cfg(feature = "desktop")]
+    pub Code: crate::desktop::export::CodeSource,
 }
 
 impl ExportState {
     pub fn new(App: &DespiteApp) -> Self {
-        let Name = App.Project.Active.and_then(|Document| App.Project.document_name(Document)).unwrap_or("export").to_string();
-        let IsScene = App.active_scene_id().is_some();
+        let Animation = crate::animator::is_animation(App);
+        let Name = if Animation {
+            App.Project.Rig.Clips.get(crate::animator::clip_index(App)).map(|Found| Found.Name.clone()).unwrap_or_else(|| "animation".into())
+        } else {
+            App.Project.Active.and_then(|Document| App.Project.document_name(Document)).unwrap_or("export").to_string()
+        };
+        let IsScene = App.active_scene_id().is_some() || Animation;
         Self {
             What: ExportWhat::CurrentDocument,
             Format: if IsScene { ExportFormat::Gif } else { ExportFormat::Png },
@@ -274,6 +293,8 @@ impl ExportState {
             Result: None,
             #[cfg(feature = "desktop")]
             Video: despite_video::VideoOptions { Quality: App.Settings.VideoQuality, Ffmpeg: App.Settings.FfmpegPath.clone(), ..Default::default() },
+            #[cfg(feature = "desktop")]
+            Code: crate::desktop::export::CodeSource::Document,
         }
     }
 
@@ -398,26 +419,51 @@ pub fn shortcuts_ui(Ui: &mut Ui) {
     });
 }
 
-fn modal_window<'a>(Title: &'a str, Context: &Context) -> egui::Window<'a> {
+pub struct ModalWindow<'a> {
+    Window: egui::Window<'a>,
+    MaxHeight: f32,
+}
+
+impl<'a> ModalWindow<'a> {
+    pub fn default_width(mut self, Width: f32) -> Self {
+        self.Window = self.Window.default_width(Width);
+        self
+    }
+
+    pub fn show<R>(self, Context: &Context, Content: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+        let MaxHeight = self.MaxHeight;
+        self.Window
+            .show(Context, |Ui| egui::ScrollArea::vertical().auto_shrink([false, true]).max_height(MaxHeight).show(Ui, Content).inner)
+            .and_then(|Shown| Shown.inner)
+    }
+}
+
+pub fn modal_window<'a>(Title: impl Into<egui::WidgetText>, Context: &Context, Open: &'a mut bool, Compact: bool) -> ModalWindow<'a> {
     let Screen = Context.content_rect();
     let Width = (Screen.width() - 24.0).max(200.0);
-    egui::Window::new(Title)
+    let Window = egui::Window::new(Title)
+        .open(Open)
         .collapsible(false)
-        .resizable(true)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .resizable([true, false])
         .default_width(Width.min(440.0))
-        .max_width(Width)
-        .max_height((Screen.height() - 24.0).max(200.0))
-        .vscroll(true)
+        .max_width(Width);
+    let Window = if Compact {
+        Window.anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+    } else {
+        Window.pivot(egui::Align2::CENTER_CENTER).default_pos(Screen.center()).constrain(true)
+    };
+    ModalWindow { Window, MaxHeight: (Screen.height() - 90.0).max(160.0) }
 }
 
 pub fn show(App: &mut DespiteApp, Context: &Context) {
     let Some(Current) = App.Dialog.take() else { return };
     let mut Keep = true;
+    let mut Open = true;
+    let Compact = App.Compact;
     let mut Next: Option<Dialog> = None;
     match Current {
         Dialog::NewProject(mut State) => {
-            modal_window("New Project", Context).show(Context, |Ui| {
+            modal_window("New Project", Context, &mut Open, Compact).show(Context, |Ui| {
                 egui::Grid::new("NewProjectGrid").num_columns(2).show(Ui, |Ui| {
                     Ui.label("Name");
                     Ui.text_edit_singleline(&mut State.Name);
@@ -427,13 +473,12 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
                         for Kind in ProjectKind::All {
                             Ui.radio_value(&mut State.Kind, *Kind, Kind.name()).on_hover_text(Kind.description());
                         }
-                        Ui.add_enabled(false, egui::RadioButton::new(false, "Animation (coming later)"));
                     });
                     Ui.end_row();
                 });
                 Ui.label(RichText::new(State.Kind.description()).weak());
                 Ui.separator();
-                Ui.label(RichText::new("First image").strong());
+                Ui.label(RichText::new(if State.Kind == ProjectKind::Animation { "Stage (the size of the exported animation)" } else { "First image" }).strong());
                 size_fields(Ui, &mut State.Width, &mut State.Height, &mut State.PixelArt);
                 background_picker(Ui, &mut State.Background, &mut State.Custom);
                 Ui.separator();
@@ -447,6 +492,10 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
                         Keep = false;
                         App.open_dialog();
                     }
+                    if State.Kind == ProjectKind::Animation && Ui.button("Start from the sample rig").on_hover_text("A finished character with bones, IK, look-at, logic and three animations to explore").clicked() {
+                        Keep = false;
+                        crate::animator::open_sample(App);
+                    }
                     if Ui.button("Cancel").clicked() {
                         Keep = false;
                     }
@@ -457,7 +506,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::NewImage(mut State) => {
-            modal_window("New Image", Context).show(Context, |Ui| {
+            modal_window("New Image", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.horizontal(|Ui| {
                     Ui.label("Name");
                     Ui.text_edit_singleline(&mut State.Name);
@@ -486,7 +535,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::NewScene(mut State) => {
-            modal_window("New Scene", Context).show(Context, |Ui| {
+            modal_window("New Scene", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label("A scene arranges many project images together (with positions, scale, rotation, opacity and blend), and can play animated images.");
                 egui::Grid::new("NewSceneGrid").num_columns(2).show(Ui, |Ui| {
                     Ui.label("Name");
@@ -520,7 +569,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::ResizeCanvas(mut State) => {
-            modal_window("Resize Canvas", Context).show(Context, |Ui| {
+            modal_window("Resize Canvas", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.horizontal(|Ui| {
                     Ui.label("Width");
                     number_box(Ui, &mut State.Width, 1, 16384, "ResizeWidth");
@@ -559,7 +608,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::ScaleImage(mut State) => {
-            modal_window("Scale Image", Context).show(Context, |Ui| {
+            modal_window("Scale Image", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.horizontal(|Ui| {
                     Ui.label("Percent");
                     if Ui.add(egui::DragValue::new(&mut State.Percent).range(1.0..=6400.0).suffix("%")).changed() {
@@ -617,7 +666,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
         Dialog::Filter(mut State) => {
             let mut Apply = false;
             let mut Cancel = false;
-            modal_window(State.Chosen.name(), Context).show(Context, |Ui| {
+            modal_window(State.Chosen.name(), Context, &mut Open, Compact).show(Context, |Ui| {
                 if filter_settings(Ui, &mut State.Chosen) {
                     State.Dirty = true;
                 }
@@ -629,6 +678,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
                     Cancel = Ui.button("Cancel").clicked();
                 });
             });
+            Cancel |= !Open;
             if State.Dirty {
                 State.Dirty = false;
                 filter_preview(App, &mut State);
@@ -650,7 +700,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::Export(mut State) => {
-            modal_window("Export", Context).default_width(520.0).show(Context, |Ui| {
+            modal_window("Export", Context, &mut Open, Compact).default_width(520.0).show(Context, |Ui| {
                 export_ui(App, Ui, &mut State, &mut Keep);
             });
             if Keep {
@@ -662,7 +712,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
                 BrowserMode::Open => "Open Project",
                 BrowserMode::Save => "Save Project",
                 BrowserMode::Import { .. } => "Import Image",
-            }, Context)
+            }, Context, &mut Open, Compact)
             .show(Context, |Ui| {
                 file_browser_ui(App, Ui, &mut State, &mut Keep);
             });
@@ -671,7 +721,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::ConfirmDiscard(Action) => {
-            modal_window("Unsaved changes", Context).show(Context, |Ui| {
+            modal_window("Unsaved changes", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label(format!("\"{}\" has unsaved changes.", App.Project.Name));
                 Ui.horizontal(|Ui| {
                     if Ui.button("Save").clicked() {
@@ -696,7 +746,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::Rename(mut State) => {
-            modal_window("Name", Context).show(Context, |Ui| {
+            modal_window("Name", Context, &mut Open, Compact).show(Context, |Ui| {
                 let Response = Ui.text_edit_singleline(&mut State.Text);
                 Response.request_focus();
                 let Enter = Ui.input(|Input| Input.key_pressed(egui::Key::Enter));
@@ -715,7 +765,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::About => {
-            modal_window("About Despite", Context).show(Context, |Ui| {
+            modal_window("About Despite", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.heading(format!("Despite {}", env!("CARGO_PKG_VERSION")));
                 Ui.label("An open source art program for pixel art, painting, sprite sheets, scenes, shaders and generative project code.");
                 Ui.label(format!("Licensed {}", env!("CARGO_PKG_LICENSE")));
@@ -732,7 +782,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
         Dialog::PasteTooLarge(Pixels) => {
             let Canvas = App.Project.active_image().map(|Found| (Found.Width, Found.Height)).unwrap_or((0, 0));
             let mut Choice = None;
-            modal_window("Pasted image is larger than the canvas", Context).show(Context, |Ui| {
+            modal_window("Pasted image is larger than the canvas", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label(crate::clipboard::oversize_message(&Pixels, Canvas));
                 Ui.label("What would you like to do?");
                 Ui.add_space(6.0);
@@ -759,7 +809,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::ShareBrush(mut State) => {
-            modal_window("Share brush", Context).show(Context, |Ui| {
+            modal_window("Share brush", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label("Packages brushes into one .despitebrush file. Send it to another device (chat, email, AirDrop, USB) and install it there from Brush → Install brushes.");
                 egui::Grid::new("ShareBrushGrid").num_columns(2).show(Ui, |Ui| {
                     Ui.label("Pack name");
@@ -801,7 +851,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::Shortcuts => {
-            modal_window("Keyboard shortcuts", Context).show(Context, |Ui| {
+            modal_window("Keyboard shortcuts", Context, &mut Open, Compact).show(Context, |Ui| {
                 shortcuts_ui(Ui);
                 if Ui.button("Close").clicked() {
                     Keep = false;
@@ -812,7 +862,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::InstallBrush => {
-            modal_window("Install brushes", Context).show(Context, |Ui| {
+            modal_window("Install brushes", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label("Brush files (.despitebrush) found on this device:");
                 let mut Found: Vec<PathBuf> = Vec::new();
                 for Folder in platform::brush_search_dirs() {
@@ -858,7 +908,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::ManageBrushes => {
-            modal_window("Manage brushes", Context).show(Context, |Ui| {
+            modal_window("Manage brushes", Context, &mut Open, Compact).show(Context, |Ui| {
                 Ui.label(RichText::new("Installed brush packs").strong());
                 if App.Brushes.Installed.is_empty() {
                     Ui.label(RichText::new("None installed.").weak());
@@ -929,7 +979,7 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
             }
         }
         Dialog::Message(Title, Body) => {
-            modal_window(&Title, Context).show(Context, |Ui| {
+            modal_window(&Title, Context, &mut Open, Compact).show(Context, |Ui| {
                 egui::ScrollArea::vertical().max_height(420.0).show(Ui, |Ui| {
                     Ui.label(&Body);
                 });
@@ -941,6 +991,9 @@ pub fn show(App: &mut DespiteApp, Context: &Context) {
                 Next = Some(Dialog::Message(Title, Body));
             }
         }
+    }
+    if !Open {
+        Next = None;
     }
     if App.Dialog.is_none() {
         App.Dialog = Next;
@@ -1132,9 +1185,16 @@ fn filter_preview(App: &mut DespiteApp, State: &mut FilterState) {
     }
 }
 
-fn gather_frames(App: &DespiteApp, State: &ExportState) -> Vec<export::Frame> {
+fn frame_source(App: &DespiteApp, State: &ExportState) -> Option<FrameSource> {
+    if crate::animator::is_animation(App) {
+        let Clip = crate::animator::clip_index(App);
+        return Some(match State.What {
+            ExportWhat::CurrentFrame => FrameSource::AnimationFrame { Clip, Frame: App.Anim.Frame as u32 },
+            _ => FrameSource::Animation { Clip },
+        });
+    }
     let Document = App.Project.Active;
-    let Source = match (State.What, Document) {
+    Some(match (State.What, Document) {
         (ExportWhat::AllImages, _) => FrameSource::AllImages,
         (ExportWhat::CurrentDocument, Some(DocumentRef::Image(Id))) => FrameSource::Image(Id),
         (ExportWhat::CurrentDocument, Some(DocumentRef::Scene(Id))) => FrameSource::Scene(Id),
@@ -1149,9 +1209,11 @@ fn gather_frames(App: &DespiteApp, State: &ExportState) -> Vec<export::Frame> {
         (ExportWhat::EachLayer, Some(DocumentRef::Image(Id))) => FrameSource::Layers { Image: Id, Space: State.Space },
         (_, Some(DocumentRef::Image(Id))) => FrameSource::Image(Id),
         (_, Some(DocumentRef::Scene(Id))) => FrameSource::Scene(Id),
-        (_, None) => return Vec::new(),
-    };
-    let mut Frames = export::collect_frames(&App.Project, &Source);
+        (_, None) => return None,
+    })
+}
+
+fn finish_frames(State: &ExportState, mut Frames: Vec<export::Frame>) -> Vec<export::Frame> {
     export::scale_frames(&mut Frames, &State.Scale);
     if State.Flatten {
         for Entry in &mut Frames {
@@ -1159,6 +1221,39 @@ fn gather_frames(App: &DespiteApp, State: &ExportState) -> Vec<export::Frame> {
         }
     }
     Frames
+}
+
+fn sources(App: &DespiteApp, State: &ExportState) -> Vec<FrameSource> {
+    if crate::animator::is_animation(App) && State.What == ExportWhat::AllImages {
+        return (0..App.Project.Rig.Clips.len()).map(|Clip| FrameSource::Animation { Clip }).collect();
+    }
+    frame_source(App, State).into_iter().collect()
+}
+
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+fn plain_frames(App: &DespiteApp, State: &ExportState) -> Vec<export::Frame> {
+    let Frames = sources(App, State).iter().flat_map(|Source| export::collect_frames(&App.Project, Source)).collect();
+    finish_frames(State, Frames)
+}
+
+fn gather_frames(App: &mut DespiteApp, State: &ExportState) -> Result<Vec<export::Frame>, String> {
+    #[cfg(feature = "desktop")]
+    {
+        use crate::desktop::export::{CodeSource, document_frames, script_frames};
+        let Frames = match State.Code {
+            CodeSource::Script(Id) => script_frames(App, Id)?,
+            CodeSource::Document => {
+                let mut Collected = Vec::new();
+                for Source in sources(App, State) {
+                    Collected.extend(document_frames(App, &Source)?);
+                }
+                Collected
+            }
+        };
+        return Ok(finish_frames(State, Frames));
+    }
+    #[allow(unreachable_code)]
+    Ok(plain_frames(App, State))
 }
 
 fn choose_output(App: &DespiteApp, State: &ExportState, Folder: bool) -> Option<PathBuf> {
@@ -1183,7 +1278,7 @@ fn choose_output(App: &DespiteApp, State: &ExportState, Folder: bool) -> Option<
 }
 
 fn run_export(App: &mut DespiteApp, State: &mut ExportState) -> Result<String, String> {
-    let Frames = gather_frames(App, State);
+    let Frames = gather_frames(App, State)?;
     if Frames.is_empty() {
         return Err("Nothing to export".into());
     }
@@ -1226,11 +1321,17 @@ fn run_export(App: &mut DespiteApp, State: &mut ExportState) -> Result<String, S
 }
 
 fn export_ui(App: &mut DespiteApp, Ui: &mut Ui, State: &mut ExportState, Keep: &mut bool) {
+    let Animation = crate::animator::is_animation(App);
     let IsScene = App.active_scene_id().is_some();
     egui::Grid::new("ExportGrid").num_columns(2).show(Ui, |Ui| {
         Ui.label("Export");
-        egui::ComboBox::from_id_salt("ExportWhat").selected_text(State.What.name()).width(280.0).show_ui(Ui, |Ui| {
-            Ui.selectable_value(&mut State.What, ExportWhat::CurrentDocument, ExportWhat::CurrentDocument.name());
+        egui::ComboBox::from_id_salt("ExportWhat").selected_text(State.What.label(Animation)).width(280.0).show_ui(Ui, |Ui| {
+            Ui.selectable_value(&mut State.What, ExportWhat::CurrentDocument, ExportWhat::CurrentDocument.label(Animation));
+            if Animation {
+                Ui.selectable_value(&mut State.What, ExportWhat::CurrentFrame, ExportWhat::CurrentFrame.label(true));
+                Ui.selectable_value(&mut State.What, ExportWhat::AllImages, ExportWhat::AllImages.label(true));
+                return;
+            }
             if IsScene {
                 Ui.selectable_value(&mut State.What, ExportWhat::CurrentFrame, ExportWhat::CurrentFrame.name());
             } else {
@@ -1288,6 +1389,8 @@ fn export_ui(App: &mut DespiteApp, Ui: &mut Ui, State: &mut ExportState, Keep: &
             color_button(Ui, &mut State.FlattenColor);
         }
     });
+    #[cfg(feature = "desktop")]
+    crate::desktop::export::export_section(App, Ui, &mut State.Code, State.What == ExportWhat::AllImages);
     match State.Format {
         ExportFormat::SpriteSheet => {
             Ui.separator();
@@ -1331,7 +1434,7 @@ fn export_ui(App: &mut DespiteApp, Ui: &mut Ui, State: &mut ExportState, Keep: &
                 Ui.horizontal(|Ui| {
                     Ui.add(egui::DragValue::new(&mut State.Video.Fps).range(1.0..=120.0).prefix("fps "));
                     if Ui.small_button("From frames").clicked() {
-                        let Frames = gather_frames(App, State);
+                        let Frames = plain_frames(App, State);
                         State.Video.Fps = despite_video::fps_from_frames(&Frames);
                     }
                     Ui.add(egui::Slider::new(&mut State.Video.Quality, 0..=51).text("CRF (lower = better)"));
@@ -1539,6 +1642,7 @@ pub fn settings_window(App: &mut DespiteApp, Context: &Context) {
                 Ui.checkbox(&mut Settings.TilePreview, "Tile preview (seamless check)");
                 Ui.checkbox(&mut Settings.SmoothZoomedOut, "Smooth canvas when zoomed out");
                 Ui.checkbox(&mut Settings.InvertScroll, "Invert scroll direction");
+                Ui.checkbox(&mut Settings.SmoothZoom, "Smooth zoom (otherwise zoom snaps to crisp pixel-perfect levels)");
                 Ui.checkbox(&mut Settings.ShowBrushOutline, "Show brush outline");
                 Ui.checkbox(&mut Settings.ShowCrosshair, "Always show crosshair");
                 Ui.checkbox(&mut Settings.CanvasBorder, "Canvas border");

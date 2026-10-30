@@ -45,6 +45,8 @@ struct LayerDoc {
     Pixels: String,
     #[serde(default)]
     Boil: Option<crate::layer::BoilTag>,
+    #[serde(default)]
+    Text: Option<crate::text::TextData>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +79,8 @@ struct ProjectDoc {
     Palette: Vec<Color>,
     Active: Option<DocumentRef>,
     NextId: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    Rig: Option<crate::animation::Rig>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -136,6 +140,7 @@ impl BlobTable {
                             Transform: Entry.Transform,
                             Pixels: self.intern(&Entry.Pixels),
                             Boil: Entry.Boil,
+                            Text: Entry.Text.clone(),
                         })
                         .collect(),
                     ActiveLayer: Found.ActiveLayer,
@@ -150,6 +155,7 @@ impl BlobTable {
             Palette: Source.Palette.clone(),
             Active: Source.Active,
             NextId: Source.NextId,
+            Rig: (Source.Kind == ProjectKind::Animation).then(|| Source.Rig.clone()),
         }
     }
 }
@@ -191,8 +197,13 @@ fn encode_blob(Pixels: &Raster) -> Result<Vec<u8>> {
 }
 
 pub fn thumbnail(Source: &Project, Size: u32) -> Option<Raster> {
-    let Document = Source.Active.or_else(|| Source.first_document())?;
-    let Full = Source.render_document(Document, 0)?;
+    let Full = if Source.Kind == ProjectKind::Animation {
+        let Sprites = crate::animation::SpriteCache::build(Source);
+        crate::animation::render_frame(Source, Some(Source.Rig.ActiveClip), 0.0, &Sprites, None)
+    } else {
+        let Document = Source.Active.or_else(|| Source.first_document())?;
+        Source.render_document(Document, 0)?
+    };
     let Longest = Full.width().max(Full.height()).max(1);
     if Longest <= Size {
         return Some(Full);
@@ -312,6 +323,7 @@ fn rebuild_project(Document: ProjectDoc, Blobs: &HashMap<String, Arc<Raster>>) -
                 Transform: Entry.Transform,
                 Pixels,
                 Boil: Entry.Boil,
+                Text: Entry.Text,
             });
         }
         let mut Rebuilt = Image {
@@ -341,6 +353,7 @@ fn rebuild_project(Document: ProjectDoc, Blobs: &HashMap<String, Arc<Raster>>) -
         Palette: if Document.Palette.is_empty() { crate::project::default_palette() } else { Document.Palette },
         Active: Document.Active,
         NextId: Document.NextId,
+        Rig: Document.Rig.unwrap_or_default(),
     };
     let Highest = Rebuilt.max_used_id();
     Rebuilt.reserve_ids_above(Highest);

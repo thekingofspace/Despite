@@ -358,7 +358,8 @@ pub fn ui(App: &mut DespiteApp, Ui: &mut Ui) {
     });
     if let Some(Path) = App.Home.ConfirmDelete.clone() {
         let mut Keep = true;
-        egui::Window::new("Delete project?").collapsible(false).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(&Context, |Ui| {
+        let mut Open = true;
+        crate::dialogs::modal_window("Delete project?", &Context, &mut Open, App.Compact).show(&Context, |Ui| {
             Ui.label(format!("Permanently delete {}?", Path.display()));
             Ui.horizontal(|Ui| {
                 if Ui.button("Delete").clicked() {
@@ -375,7 +376,7 @@ pub fn ui(App: &mut DespiteApp, Ui: &mut Ui) {
                 }
             });
         });
-        if !Keep {
+        if !Keep || !Open {
             App.Home.ConfirmDelete = None;
         }
     }

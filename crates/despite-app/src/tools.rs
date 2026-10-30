@@ -11,6 +11,7 @@ pub enum Tool {
     Eraser,
     Fill,
     Gradient,
+    Text,
     Picker,
     Line,
     Rectangle,
@@ -31,6 +32,7 @@ impl Tool {
         Tool::Eraser,
         Tool::Fill,
         Tool::Gradient,
+        Tool::Text,
         Tool::Picker,
         Tool::Line,
         Tool::Rectangle,
@@ -51,6 +53,7 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::Fill => "Bucket Fill",
             Tool::Gradient => "Gradient",
+            Tool::Text => "Text",
             Tool::Picker => "Color Picker",
             Tool::Line => "Line",
             Tool::Rectangle => "Rectangle",
@@ -72,6 +75,7 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::Fill => "Fill",
             Tool::Gradient => "Gradient",
+            Tool::Text => "Text",
             Tool::Picker => "Picker",
             Tool::Line => "Line",
             Tool::Rectangle => "Rectangle",
@@ -94,6 +98,7 @@ impl Tool {
             Tool::Eraser => (Key::E, false),
             Tool::Fill => (Key::G, false),
             Tool::Gradient => (Key::G, true),
+            Tool::Text => (Key::T, false),
             Tool::Picker => (Key::I, false),
             Tool::Line => (Key::L, false),
             Tool::Rectangle => (Key::U, false),
@@ -132,6 +137,7 @@ impl Tool {
             Tool::Eraser => "Erase with its own brush settings.",
             Tool::Fill => "Flood fill an area. Set tolerance, contiguous, sample merged and grow.",
             Tool::Gradient => "Drag to draw a gradient from primary to secondary color. Use steps + dither for pixel art.",
+            Tool::Text => "Click to type text with any installed font. Click an existing text layer to edit it.",
             Tool::Picker => "Click to pick the primary color, right-click for secondary.",
             Tool::Line => "Drag to draw a line with the current brush. Shift snaps the angle.",
             Tool::Rectangle => "Drag to draw a rectangle. Shift makes a square.",
@@ -201,6 +207,7 @@ pub struct ToolOptions {
     pub GradientBlend: BlendMode,
     pub PickerMerged: bool,
     pub MoveSelectsItems: bool,
+    pub Text: despite_core::text::TextStyle,
 }
 
 impl Default for ToolOptions {
@@ -226,6 +233,7 @@ impl Default for ToolOptions {
             GradientBlend: BlendMode::Normal,
             PickerMerged: true,
             MoveSelectsItems: true,
+            Text: despite_core::text::TextStyle::default(),
         }
     }
 }

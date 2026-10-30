@@ -3,8 +3,14 @@ use std::sync::Arc;
 use despite_core::{IRect, Mask, Raster};
 use egui::{Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 
+pub const PhysicalZoomLevels: &[f32] = &[
+    0.03125, 0.0625, 0.083333, 0.125, 0.166667, 0.25, 0.333333, 0.5, 0.666667, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 28.0,
+    32.0, 40.0, 48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0, 160.0, 192.0, 256.0, 320.0, 384.0, 512.0,
+];
+
 pub struct DocumentView {
     pub Zoom: f32,
+    pub PixelsPerPoint: f32,
     pub Pan: Vec2,
     pub NeedsFit: bool,
     pub AutoFit: bool,
@@ -25,6 +31,7 @@ impl Default for DocumentView {
     fn default() -> Self {
         Self {
             Zoom: 1.0,
+            PixelsPerPoint: 1.0,
             Pan: Vec2::ZERO,
             NeedsFit: true,
             AutoFit: true,
@@ -56,8 +63,32 @@ impl DocumentView {
     pub fn canvas_rect(&self, Viewport: Rect, Width: u32, Height: u32) -> Rect {
         let Size = Vec2::new(Width as f32, Height as f32) * self.Zoom;
         let TopLeft = Viewport.center() + self.Pan - Size * 0.5;
-        let TopLeft = Pos2::new(TopLeft.x.round(), TopLeft.y.round());
+        let Ppp = self.PixelsPerPoint.max(0.25);
+        let TopLeft = Pos2::new((TopLeft.x * Ppp).round() / Ppp, (TopLeft.y * Ppp).round() / Ppp);
         Rect::from_min_size(TopLeft, Size)
+    }
+
+    fn level_index(&self, Zoom: f32) -> usize {
+        let Physical = Zoom * self.PixelsPerPoint.max(0.25);
+        PhysicalZoomLevels
+            .iter()
+            .enumerate()
+            .min_by(|(_, Left), (_, Right)| ((*Left / Physical).ln().abs()).total_cmp(&(*Right / Physical).ln().abs()))
+            .map(|(Index, _)| Index)
+            .unwrap_or(9)
+    }
+
+    pub fn snap_zoom(&self, Zoom: f32) -> f32 {
+        PhysicalZoomLevels[self.level_index(Zoom)] / self.PixelsPerPoint.max(0.25)
+    }
+
+    pub fn stepped_zoom(&self, Steps: i32) -> f32 {
+        let Index = (self.level_index(self.Zoom) as i32 + Steps).clamp(0, PhysicalZoomLevels.len() as i32 - 1) as usize;
+        PhysicalZoomLevels[Index] / self.PixelsPerPoint.max(0.25)
+    }
+
+    pub fn actual_size_zoom(&self) -> f32 {
+        1.0 / self.PixelsPerPoint.max(0.25)
     }
 
     pub fn screen_to_image(&self, Viewport: Rect, Width: u32, Height: u32, Point: Pos2) -> (f32, f32) {
@@ -74,7 +105,10 @@ impl DocumentView {
         let Margin = 32.0;
         let Available = (Viewport.size() - Vec2::splat(Margin * 2.0)).max(Vec2::splat(16.0));
         let Scale = (Available.x / Width.max(1) as f32).min(Available.y / Height.max(1) as f32);
-        self.Zoom = if Scale >= 1.0 { Scale.floor().max(1.0) } else { Scale };
+        let Ppp = self.PixelsPerPoint.max(0.25);
+        let Physical = Scale * Ppp;
+        let Level = PhysicalZoomLevels.iter().copied().filter(|Level| *Level <= Physical).fold(PhysicalZoomLevels[0], f32::max);
+        self.Zoom = Level / Ppp;
         self.Pan = Vec2::ZERO;
         self.NeedsFit = false;
     }

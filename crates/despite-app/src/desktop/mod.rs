@@ -1,5 +1,6 @@
 mod code;
 mod compile;
+pub mod export;
 #[cfg(target_os = "linux")]
 mod tablet;
 
@@ -73,6 +74,8 @@ pub struct DesktopState {
     pub InterpreterChecked: bool,
     pub RunRequested: bool,
     pub PendingJob: Option<despite_shader::ShaderJob>,
+    pub ExportRunner: Option<despite_shader::ShaderRunner>,
+    pub ShaderFailures: std::collections::HashMap<u64, String>,
     #[cfg(target_os = "linux")]
     pub Tablet: Option<tablet::TabletInput>,
     pub TabletStatus: String,
@@ -103,6 +106,8 @@ impl DesktopState {
             InterpreterChecked: false,
             RunRequested: false,
             PendingJob: None,
+            ExportRunner: None,
+            ShaderFailures: std::collections::HashMap::new(),
             #[cfg(target_os = "linux")]
             Tablet: None,
             TabletStatus: String::new(),

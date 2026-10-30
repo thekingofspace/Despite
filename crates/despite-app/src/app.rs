@@ -166,6 +166,8 @@ pub struct DespiteApp {
     pub(crate) PointerImagePosition: Option<(f32, f32)>,
     pub(crate) PenTilt: Option<[f32; 2]>,
     pub(crate) Floating: Option<crate::transform::FloatingSelection>,
+    pub(crate) TextSession: Option<crate::textui::TextSession>,
+    pub(crate) Anim: crate::animator::AnimState,
     pub(crate) ContentBounds: HashMap<despite_core::LayerId, (usize, u64, Option<IRect>)>,
     #[cfg(feature = "desktop")]
     pub(crate) Desktop: crate::desktop::DesktopState,
@@ -222,11 +224,14 @@ impl DespiteApp {
             PointerImagePosition: None,
             PenTilt: None,
             Floating: None,
+            TextSession: None,
+            Anim: Default::default(),
             ContentBounds: HashMap::new(),
             #[cfg(feature = "desktop")]
             Desktop: crate::desktop::DesktopState::new(&Settings),
             Settings,
         };
+        despite_core::text::start_loading();
         App.restore_view_prefs();
         if App.Compact {
             App.ShowLeft = false;
@@ -437,6 +442,7 @@ impl DespiteApp {
 
     pub(crate) fn set_tool(&mut self, Next: Tool) {
         if self.Tool != Next {
+            crate::textui::finish_session(self);
             self.cancel_interaction();
             crate::transform::commit_floating(self);
             self.PreviousTool = Some(self.Tool);
@@ -498,6 +504,8 @@ impl DespiteApp {
         self.LayerThumbs.clear();
         self.ContentBounds.clear();
         self.Floating = None;
+        self.TextSession = None;
+        self.Anim = Default::default();
         self.HasProject = true;
         self.Screen = Screen::Editor;
         self.Generation += 1;
@@ -535,11 +543,22 @@ impl DespiteApp {
             PendingAction::Open(None) => self.open_dialog(),
             PendingAction::Close => self.close_project(),
             PendingAction::Quit => self.AllowClose = true,
+            PendingAction::OpenSampleRig => crate::animator::open_sample(self),
         }
     }
 
     pub(crate) fn create_project(&mut self, Kind: ProjectKind, Name: &str, Width: u32, Height: u32, PixelArt: bool, Background: Option<Color>) {
         let mut Created = Project::new_of_kind(Name, Kind);
+        if Kind == ProjectKind::Animation {
+            Created.Rig = despite_core::animation::Rig::new(Width.clamp(1, despite_core::raster::MaxDimension), Height.clamp(1, despite_core::raster::MaxDimension));
+            Created.Rig.PixelArt = PixelArt;
+            Created.Rig.Background = Background;
+            let ClipId = Created.alloc_id();
+            Created.Rig.Clips[0].Id = ClipId;
+            self.reset_project(Created, None, None);
+            self.set_status("New Animation project: import parts, draw bones, then animate on the timeline");
+            return;
+        }
         let Id = Created.add_image("Image 1", Width.clamp(1, despite_core::raster::MaxDimension), Height.clamp(1, despite_core::raster::MaxDimension));
         Created.Active = Some(DocumentRef::Image(Id));
         let Target = Created.image_mut(Id).expect("image exists");
@@ -717,6 +736,10 @@ impl DespiteApp {
     }
 
     pub(crate) fn import_images(&mut self, Paths: &[PathBuf], AsLayers: bool) {
+        if self.Screen == Screen::Editor && self.HasProject && crate::animator::is_animation(self) {
+            crate::animator::import_assets(self, Paths);
+            return;
+        }
         if self.Screen == Screen::Home || !self.HasProject {
             if let Some(First) = Paths.first() {
                 self.project_from_image(First);
@@ -1051,6 +1074,7 @@ impl DespiteApp {
         let Name = Chosen.name();
         self.with_active_layer(Name, |Target| {
             if let Some(Entry) = Target.active_layer_mut() {
+                Entry.Text = None;
                 let Matrix = Entry.matrix();
                 let Offset = Entry.Transform.integer_offset();
                 let Clip = Selected.as_deref().map(|Found| MaskView::new(Found, Matrix, Offset));
@@ -1168,20 +1192,20 @@ impl DespiteApp {
             }
         if Consume(Modifiers::NONE, Key::Num1)
             && let Some(View) = self.active_view() {
-                View.Zoom = 1.0;
+                View.Zoom = View.actual_size_zoom();
                 View.Pan = egui::Vec2::ZERO;
             }
         if Consume(Modifiers::NONE, Key::Equals) || Consume(Modifiers::NONE, Key::Plus) {
-            let Step = self.Settings.ZoomStep;
+            let (Step, Smooth) = (self.Settings.ZoomStep, self.Settings.SmoothZoom);
             if let Some(View) = self.active_view() {
-                View.Zoom = (View.Zoom * Step).min(256.0);
+                View.Zoom = if Smooth { (View.Zoom * Step).min(256.0) } else { View.stepped_zoom(1) };
                 View.AutoFit = false;
             }
         }
         if Consume(Modifiers::NONE, Key::Minus) {
-            let Step = self.Settings.ZoomStep;
+            let (Step, Smooth) = (self.Settings.ZoomStep, self.Settings.SmoothZoom);
             if let Some(View) = self.active_view() {
-                View.Zoom = (View.Zoom / Step).max(0.02);
+                View.Zoom = if Smooth { (View.Zoom / Step).max(0.02) } else { View.stepped_zoom(-1) };
                 View.AutoFit = false;
             }
         }
@@ -1461,7 +1485,7 @@ impl DespiteApp {
                 }
                 if Ui.button("Actual Size (100%)").clicked() {
                     if let Some(View) = self.active_view() {
-                        View.Zoom = 1.0;
+                        View.Zoom = View.actual_size_zoom();
                         View.Pan = egui::Vec2::ZERO;
                         View.AutoFit = false;
                     }
@@ -1821,6 +1845,17 @@ impl eframe::App for DespiteApp {
             self.update_title(&Context);
             return;
         }
+        if crate::animator::is_animation(self) {
+            crate::animator::ui(self, Ui);
+            dialogs::show(self, &Context);
+            #[cfg(feature = "desktop")]
+            crate::desktop::windows(self, &Context);
+            if self.ShowSettings {
+                dialogs::settings_window(self, &Context);
+            }
+            self.update_title(&Context);
+            return;
+        }
         if self.Dialog.is_none() && !self.ShowSettings {
             self.handle_shortcuts(&Context);
         }
@@ -1845,6 +1880,7 @@ impl eframe::App for DespiteApp {
                 crate::canvas::canvas_ui(self, Ui);
             });
             self.compact_sheets(&Context, SheetArea);
+            crate::textui::text_window(self, &Context);
             dialogs::show(self, &Context);
             #[cfg(feature = "desktop")]
             crate::desktop::windows(self, &Context);
@@ -1875,6 +1911,7 @@ impl eframe::App for DespiteApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(crate::view::to_color32(self.Settings.CanvasBackground))).show(Ui, |Ui| {
             crate::canvas::canvas_ui(self, Ui);
         });
+        crate::textui::text_window(self, &Context);
         dialogs::show(self, &Context);
         #[cfg(feature = "desktop")]
         crate::desktop::windows(self, &Context);

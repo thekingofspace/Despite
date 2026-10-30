@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use despite_core::export::{self, Frame, FrameSource, SheetOptions};
 use despite_core::params::ParamValue;
 use despite_core::{
-    BlendMode, CompileMode, DocumentRef, ImageId, Layer, LayerTransform, Playback, Project, ProjectShader, Raster, SceneId, SceneItem, ShaderTarget,
+    BlendMode, CompileMode, DocumentRef, ImageId, Layer, LayerTransform, Playback, Project, ProjectScript, ProjectShader, Raster, SceneId, SceneItem, ShaderTarget,
 };
 use despite_script::{OutputMode, ScriptHandle, ScriptImage, ScriptJob, ScriptLayer, ScriptPixels, ScriptScene, ScriptValue, SceneSource};
 use despite_shader::{ShaderImage, ShaderInput, ShaderJob, ShaderParam, ShaderValue};
@@ -72,6 +72,13 @@ pub fn run_script(App: &mut DespiteApp) {
         App.ShowBottom = true;
         return;
     };
+    let Job = script_job(App, &Script, Interpreter);
+    App.Desktop.ErrorLine = None;
+    App.Desktop.log(false, format!("▶ Running {} …", Script.Name));
+    App.Desktop.Running = Some(RunningScript { Handle: ScriptHandle::spawn(Job), Name: Script.Name.clone(), Started: App.Now });
+}
+
+pub fn script_job(App: &DespiteApp, Script: &ProjectScript, Interpreter: PathBuf) -> ScriptJob {
     let Images: Vec<ScriptImage> = App
         .Project
         .Images
@@ -114,7 +121,7 @@ pub fn run_script(App: &mut DespiteApp) {
         }
     }
     let Timeout = if Script.TimeoutSeconds > 0 { Script.TimeoutSeconds } else { App.Settings.ScriptTimeoutSeconds };
-    let Job = ScriptJob {
+    ScriptJob {
         Source: Script.Source.clone(),
         Interpreter,
         ProjectName: App.Project.Name.clone(),
@@ -123,10 +130,35 @@ pub fn run_script(App: &mut DespiteApp) {
         Inputs,
         RequestedMode: to_output_mode(Script.Mode),
         Timeout: Some(std::time::Duration::from_secs(Timeout as u64)),
-    };
-    App.Desktop.ErrorLine = None;
-    App.Desktop.log(false, format!("▶ Running {} …", Script.Name));
-    App.Desktop.Running = Some(RunningScript { Handle: ScriptHandle::spawn(Job), Name: Script.Name.clone(), Started: App.Now });
+    }
+}
+
+pub fn output_images(Output: &despite_script::ScriptOutput) -> Vec<(String, Vec<Frame>)> {
+    Output
+        .Images
+        .iter()
+        .map(|Generated| {
+            let Frames = Generated
+                .Frames
+                .iter()
+                .filter_map(|Entry| {
+                    Raster::from_rgba(Entry.Pixels.Width, Entry.Pixels.Height, Entry.Pixels.Rgba.clone())
+                        .ok()
+                        .map(|Pixels| Frame { Name: Generated.Name.clone(), Pixels, DelayMs: Entry.DelayMs.max(10) })
+                })
+                .collect();
+            (Generated.Name.clone(), Frames)
+        })
+        .collect()
+}
+
+pub fn export_frames(Owner: &Project, Output: &despite_script::ScriptOutput) -> Vec<Frame> {
+    let Images = output_images(Output);
+    let Mode = to_compile_mode(Output.Mode);
+    if Mode == CompileMode::Scene && Output.Scene.is_some() {
+        return build_preview(Owner, Mode, &Images, Output.Scene.as_ref());
+    }
+    Images.into_iter().flat_map(|(_, Frames)| Frames).collect()
 }
 
 pub fn poll_script(App: &mut DespiteApp, Context: &egui::Context) {
@@ -143,22 +175,7 @@ pub fn poll_script(App: &mut DespiteApp, Context: &egui::Context) {
         Some(Ok(Output)) => {
             App.Desktop.Running = None;
             App.Desktop.log(false, format!("✔ {Name} finished in {:.2}s ({} image(s){})", Output.Elapsed.as_secs_f32(), Output.Images.len(), if Output.Scene.is_some() { ", 1 scene" } else { "" }));
-            let Images: Vec<(String, Vec<Frame>)> = Output
-                .Images
-                .iter()
-                .map(|Generated| {
-                    let Frames = Generated
-                        .Frames
-                        .iter()
-                        .filter_map(|Entry| {
-                            Raster::from_rgba(Entry.Pixels.Width, Entry.Pixels.Height, Entry.Pixels.Rgba.clone())
-                                .ok()
-                                .map(|Pixels| Frame { Name: Generated.Name.clone(), Pixels, DelayMs: Entry.DelayMs.max(10) })
-                        })
-                        .collect();
-                    (Generated.Name.clone(), Frames)
-                })
-                .collect();
+            let Images = output_images(&Output);
             if Images.is_empty() && Output.Scene.is_none() {
                 App.Desktop.log(true, "The script produced no output. Use despite.output().add_image(...) or .scene(...).");
                 App.Desktop.Tab = CodeTab::Console;
@@ -301,7 +318,7 @@ fn shader_value(Value: &ParamValue) -> Option<ShaderValue> {
     })
 }
 
-fn shader_image(Source: &Raster) -> ShaderImage {
+pub fn shader_image(Source: &Raster) -> ShaderImage {
     ShaderImage::new(Source.width(), Source.height(), Source.data().to_vec())
 }
 
@@ -367,13 +384,18 @@ pub fn run_shader(App: &mut DespiteApp) {
         App.set_status("No shader to run");
         return;
     };
-    let Source = match Shader.Target {
-        ShaderTarget::ActiveDocument => {
-            let Frame = App.Project.Active.and_then(|Document| App.Views.get(&Document)).map(|View| View.Frame).unwrap_or(0);
-            App.Project.Active.and_then(|Document| App.Project.render_document(Document, Frame))
+    let Source = if crate::animator::is_animation(App) {
+        let Sprites = despite_core::animation::SpriteCache::build(&App.Project);
+        Some(despite_core::animation::render_frame(&App.Project, Some(crate::animator::clip_index(App)), App.Anim.Frame, &Sprites, None))
+    } else {
+        match Shader.Target {
+            ShaderTarget::ActiveDocument => {
+                let Frame = App.Project.Active.and_then(|Document| App.Views.get(&Document)).map(|View| View.Frame).unwrap_or(0);
+                App.Project.Active.and_then(|Document| App.Project.render_document(Document, Frame))
+            }
+            ShaderTarget::Image(Id) => App.Project.render_document(DocumentRef::Image(Id), 0),
+            ShaderTarget::Scene(Id) => App.Project.render_document(DocumentRef::Scene(Id), 0),
         }
-        ShaderTarget::Image(Id) => App.Project.render_document(DocumentRef::Image(Id), 0),
-        ShaderTarget::Scene(Id) => App.Project.render_document(DocumentRef::Scene(Id), 0),
     };
     let Some(Main) = Source else {
         App.set_status("The shader input image no longer exists");
@@ -390,6 +412,7 @@ pub fn run_shader(App: &mut DespiteApp) {
         FrameCount,
         Fps: Shader.Fps.max(0.1),
         SmoothSampling: Shader.Smooth,
+        OnlyFrame: None,
     };
     if let Err(Problem) = despite_shader::validate(&Job) {
         App.Desktop.log(true, format!("✖ {}: {Problem}", Shader.Name));
@@ -538,7 +561,8 @@ pub fn windows(App: &mut DespiteApp, Context: &egui::Context) {
     preview_window(App, Context);
     super::plugins_window(App, Context);
     if App.Desktop.AskTrust {
-        egui::Window::new("Run project code?").collapsible(false).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(Context, |Ui| {
+        let mut Open = true;
+        crate::dialogs::modal_window("Run project code?", Context, &mut Open, App.Compact).show(Context, |Ui| {
             Ui.label("This project was opened from a file and contains Python code.");
             Ui.label("Python code can read, change or delete your files and use the network. Only run code from people you trust.");
             Ui.horizontal(|Ui| {
@@ -552,18 +576,25 @@ pub fn windows(App: &mut DespiteApp, Context: &egui::Context) {
                 }
             });
         });
+        if !Open {
+            App.Desktop.AskTrust = false;
+        }
     }
     if let Some(Job) = &App.Desktop.Video {
         let Progress = Job.Progress.lock().map(|Value| *Value).unwrap_or(0.0);
         let Target = Job.Target.display().to_string();
         let Cancel = Job.Cancel.clone();
-        egui::Window::new("Exporting video").collapsible(false).show(Context, |Ui| {
+        let mut Open = true;
+        egui::Window::new("Exporting video").open(&mut Open).collapsible(false).show(Context, |Ui| {
             Ui.label(Target);
             Ui.add(egui::ProgressBar::new(Progress).show_percentage());
             if Ui.button("Cancel").clicked() {
                 Cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         });
+        if !Open {
+            Cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
