@@ -1,0 +1,16 @@
+[package]
+name = "despite-script"
+description = "Python project-code runner for the Despite art program (desktop only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+log.workspace = true

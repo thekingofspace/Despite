@@ -1,0 +1,59 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/despite-core",
+    "crates/despite-script",
+    "crates/despite-shader",
+    "crates/despite-plugin",
+    "crates/despite-video",
+    "crates/despite-app",
+    "crates/despite-android",
+]
+default-members = ["crates/despite-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/despite-art/despite"
+rust-version = "1.88"
+authors = ["Despite contributors"]
+
+[workspace.dependencies]
+despite-core = { path = "crates/despite-core" }
+despite-script = { path = "crates/despite-script" }
+despite-shader = { path = "crates/despite-shader" }
+despite-plugin = { path = "crates/despite-plugin" }
+despite-video = { path = "crates/despite-video" }
+despite-app = { path = "crates/despite-app", default-features = false }
+
+anyhow = "1"
+base64 = "0.22"
+bytemuck = { version = "1", features = ["derive"] }
+dirs = "7"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts"] }
+egui = "0.37"
+gif = "0.14"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+log = "0.4"
+naga = { version = "30", features = ["wgsl-in"] }
+pollster = "1"
+rayon = "1"
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+toml = "1"
+wgpu = "30"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

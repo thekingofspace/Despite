@@ -1,0 +1,66 @@
+name: Apple builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ios:
+    name: iOS (IPA)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - name: Build IPA for iPhone and iPad
+        run: IPA=1 bash scripts/build-ios.sh aarch64-apple-ios
+      - run: cp target/ios/aarch64-apple-ios/Despite.ipa despite-ios.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-ios-ipa
+          path: despite-ios.ipa
+      - name: Build simulator app
+        run: |
+          bash scripts/build-ios.sh aarch64-apple-ios-sim
+          cd target/ios/aarch64-apple-ios-sim && zip -qry "$GITHUB_WORKSPACE/despite-ios-simulator.zip" Despite.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-ios-simulator
+          path: despite-ios-simulator.zip
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: despite-ios.ipa
+
+  macos:
+    name: macOS (universal DMG)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: DMG=1 bash scripts/bundle-macos.sh
+      - run: cp target/macos/Despite.dmg despite-macos-universal.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-macos-universal
+          path: despite-macos-universal.dmg
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: despite-macos-universal.dmg

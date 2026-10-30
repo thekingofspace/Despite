@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Despite</string>
+    <key>CFBundleExecutable</key>
+    <string>despite</string>
+    <key>CFBundleIconFile</key>
+    <string>despite.icns</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.despite.app</string>
+    <key>CFBundleName</key>
+    <string>Despite</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.graphics-design</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Despite Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>despite</string>
+            </array>
+            <key>CFBundleTypeIconFile</key>
+            <string>despite.icns</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>png</string>
+                <string>gif</string>
+                <string>jpg</string>
+                <string>jpeg</string>
+                <string>webp</string>
+                <string>bmp</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

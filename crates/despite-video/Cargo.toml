@@ -1,0 +1,17 @@
+[package]
+name = "despite-video"
+description = "Video export through ffmpeg for the Despite art program (desktop only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+despite-core.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

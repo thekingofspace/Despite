@@ -1,0 +1,55 @@
+[package]
+name = "despite-app"
+description = "Despite: an open source art program for pixel art, painting, sprite sheets, scenes and shaders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lib]
+name = "despite_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "despite"
+path = "src/main.rs"
+
+[features]
+default = ["desktop"]
+desktop = [
+    "dep:despite-script",
+    "dep:despite-shader",
+    "dep:despite-plugin",
+    "dep:despite-video",
+    "dep:rfd",
+    "dep:env_logger",
+    "dep:octotablet",
+]
+
+[dependencies]
+despite-core = { workspace = true, features = ["advanced-brushes"] }
+despite-script = { workspace = true, optional = true }
+despite-shader = { workspace = true, optional = true }
+despite-plugin = { workspace = true, optional = true }
+despite-video = { workspace = true, optional = true }
+dirs.workspace = true
+eframe.workspace = true
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
+env_logger = { version = "0.11", optional = true }
+log.workspace = true
+rfd = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+winresource = "0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { workspace = true, features = ["wayland", "x11"] }
+octotablet = { version = "0.1", optional = true, default-features = false, features = ["wayland-tablet-unstable-v2"] }
+raw-window-handle = "0.6"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+eframe = { workspace = true, features = ["clipboard", "accesskit"] }

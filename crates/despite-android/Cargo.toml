@@ -1,0 +1,19 @@
+[package]
+name = "despite-android"
+description = "Android entry point for the Despite art program"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "despite"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[target.'cfg(target_os = "android")'.dependencies]
+despite-app.workspace = true
+eframe = { workspace = true, features = ["android-native-activity"] }
+winit = { version = "0.30", features = ["android-native-activity"] }
+android_logger = "0.15"
+log.workspace = true

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev ffmpeg python3-numpy python3-pil mesa-vulkan-drivers
+      - run: cargo test --workspace --exclude despite-android
+      - run: cargo clippy --workspace --exclude despite-android
+
+  linux:
+    name: Linux
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
+      - run: cargo build --release -p despite-app
+      - name: Package
+        run: |
+          Stage=despite-linux-x86_64
+          mkdir -p "$Stage/bin" "$Stage/share/applications" "$Stage/share/mime/packages" "$Stage/share/icons"
+          cp target/release/despite "$Stage/bin/"
+          cp platform/linux/despite.desktop "$Stage/share/applications/"
+          cp platform/linux/despite-mime.xml "$Stage/share/mime/packages/despite.xml"
+          cp -r platform/linux/hicolor "$Stage/share/icons/"
+          cp -r plugins "$Stage/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$Stage/"
+          tar czf despite-linux-x86_64.tar.gz "$Stage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-linux-x86_64
+          path: despite-linux-x86_64.tar.gz
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: despite-linux-x86_64.tar.gz
+
+  windows:
+    name: Windows
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p despite-app
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path Despite | Out-Null
+          Copy-Item target/release/despite.exe Despite/Despite.exe
+          Copy-Item -Recurse plugins Despite/plugins
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE Despite/
+          Compress-Archive -Path Despite -DestinationPath despite-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-windows-x86_64
+          path: despite-windows-x86_64.zip
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: despite-windows-x86_64.zip
+
+  android:
+    name: Android
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.1.0" "ndk;29.0.14206865" > /dev/null
+      - run: cargo install cargo-ndk --locked
+      - name: Build APK
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865" bash scripts/build-android.sh
+      - run: cp target/android/despite.apk despite-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: despite-android
+          path: despite-android.apk
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: despite-android.apk

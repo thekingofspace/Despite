@@ -1,0 +1,41 @@
+#![allow(non_snake_case, non_upper_case_globals)]
+
+pub mod blend;
+pub mod brush;
+pub mod color;
+pub mod error;
+pub mod export;
+pub mod fill;
+pub mod filters;
+pub mod geom;
+pub mod history;
+pub mod image;
+pub mod io;
+pub mod layer;
+pub mod overlay;
+pub mod params;
+pub mod project;
+pub mod raster;
+pub mod resample;
+pub mod rng;
+pub mod scene;
+pub mod selection;
+pub mod transform;
+
+pub use blend::BlendMode;
+pub use brush::{Brush, BrushMode, Stroke, StrokeContext, StrokePoint, Symmetry, SymmetryMode, TipShape};
+pub use color::Color;
+pub use error::{Error, Result};
+pub use geom::IRect;
+pub use history::History;
+pub use image::{Image, ImageId};
+pub use layer::{Layer, LayerId};
+pub use overlay::{OnionSkin, Overlay, OverlaySource};
+pub use params::{ParamDecl, ParamKind, ParamValue};
+pub use project::{CompileMode, DocumentRef, Project, ProjectKind, ProjectScript, ProjectShader, ShaderTarget};
+pub use raster::Raster;
+pub use resample::ResampleMethod;
+pub use scene::{Playback, Scene, SceneId, SceneItem};
+pub use fill::{GradientKind, GradientStyle};
+pub use selection::{Mask, MaskView, SelectionOp};
+pub use transform::{Affine, LayerTransform};

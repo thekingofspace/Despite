@@ -1,0 +1,42 @@
+[Plugin]
+Id = "example"
+Name = "Example Pack"
+Version = "0.1.0"
+Author = ""
+Description = "A glow effect, a checker background generator and a warm palette."
+
+[[Shader]]
+Name = "Tint Glow"
+File = "tint_glow.wgsl"
+Category = "Light"
+Params = [
+    { Name = "Strength", Kind = "Float", Min = 0.0, Max = 2.0, Default = 0.8 },
+    { Name = "Tint", Kind = "Color", Default = "#ffcc88" },
+]
+
+[[Script]]
+Name = "Checker Background"
+File = "checker.py"
+Category = "Generate"
+Mode = "Image"
+Params = [
+    { Name = "CellSize", Kind = "Int", Min = 1, Max = 64, Default = 8 },
+]
+
+[[Palette]]
+Name = "Warm Ramp"
+Colors = ["#2b0f0e", "#5c2a1d", "#a14a2b", "#e07a3a", "#f6c26b", "#fff1c1"]
+"##;
+
+pub const TemplateShader: &str = "fn effect(Uv: vec2<f32>, Pixel: vec2<f32>) -> vec4<f32> {
+    let Base = sample_input(Uv);
+    let Texel = input_texel_size();
+    var Glow = vec4<f32>(0.0);
+    for (var Offset = -3; Offset <= 3; Offset = Offset + 1) {
+        Glow = Glow + sample_input(Uv + vec2<f32>(f32(Offset), 0.0) * Texel * 2.0);
+        Glow = Glow + sample_input(Uv + vec2<f32>(0.0, f32(Offset)) * Texel * 2.0);
+    }
+    Glow = Glow / 14.0;
+    let Lit = Base.rgb + Glow.rgb * Params.Tint.rgb * Params.Strength * Glow.a;
+    return vec4<f32>(min(Lit, vec3<f32>(1.0)), max(Base.a, Glow.a * Params.Strength * 0.5));
+}

@@ -1,0 +1,26 @@
+[package]
+name = "despite-core"
+description = "Document model, raster engine, brushes, filters and file formats for the Despite art program"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# Animated tips, symmetry, colour cycling and other "weird" brush effects (desktop builds).
+advanced-brushes = []
+
+[dependencies]
+base64.workspace = true
+bytemuck.workspace = true
+gif.workspace = true
+image.workspace = true
+log.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zip.workspace = true

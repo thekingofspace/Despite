@@ -1,0 +1,9 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.rs text eol=lf
+*.wgsl text eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.despite binary

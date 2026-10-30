@@ -1,0 +1,17 @@
+[package]
+name = "despite-shader"
+description = "WGSL shader effects and VFX renderer for the Despite art program (desktop only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+log.workspace = true
+naga.workspace = true
+pollster.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
